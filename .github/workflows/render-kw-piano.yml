@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   render:
@@ -44,3 +44,15 @@ jobs:
             output/*.mp3
             output/*.mid
           retention-days: 14
+
+      - name: Publish downloadable MP3 in GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="kw-preview-${{ github.run_number }}"
+          gh release create "$TAG" \
+            output/Upright_KW_Original_Piano.mp3 \
+            output/Upright_KW_Original_Piano.mid \
+            --title "Upright Piano KW Preview #${{ github.run_number }}" \
+            --notes "Original piano instrumental rendered with the FreePats CC0 Upright Piano KW soundfont. This is a computer-rendered performance using real piano samples." \
+            --target "${{ github.sha }}"
