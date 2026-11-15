@@ -1,0 +1,46 @@
+name: Render FreePats Upright Piano KW sample
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install synthesizer and audio tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fluidsynth p7zip-full ffmpeg python3-mido
+      - name: Download official CC0 piano soundfont
+        run: |
+          mkdir -p soundbank output
+          curl --fail --location --retry 4 --retry-delay 3 \
+            'https://freepats.zenvoid.org/Piano/UprightPianoKW/UprightPianoKW-SF2-20220221.7z' \
+            --output soundbank/kw.7z
+          7z x soundbank/kw.7z -osoundbank -y
+          find soundbank -type f -iname '*.sf2' -print
+      - name: Compose original MIDI
+        run: /usr/bin/python3 scripts/make_midi.py
+      - name: Render the actual KW samples
+        run: |
+          SF2="$(find soundbank -type f -iname '*.sf2' -print -quit)"
+          test -n "$SF2"
+          fluidsynth -ni -g 0.65 -F output/Upright_KW_Original_Piano.wav -r 44100 "$SF2" output/Upright_KW_Original_Piano.mid
+          ffmpeg -y -i output/Upright_KW_Original_Piano.wav \
+            -af 'aecho=0.8:0.55:100:0.11,alimiter=limit=0.9' \
+            -c:a libmp3lame -b:a 192k output/Upright_KW_Original_Piano.mp3
+      - name: Verify generated audio
+        run: |
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 output/Upright_KW_Original_Piano.mp3
+          test -s output/Upright_KW_Original_Piano.mp3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Upright-KW-Piano-Preview
+          path: |
+            output/*.mp3
+            output/*.mid
+          retention-days: 14
