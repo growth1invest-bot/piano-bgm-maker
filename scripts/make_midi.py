@@ -76,23 +76,21 @@ for section,length in sections:
         if n%8==7 and section not in ("intro","coda"):
             speed-=2
         add(start,1,mido.MetaMessage("set_tempo",tempo=mido.bpm2tempo(speed),time=0))
-        # Release old harmony before the next one enters; quickly catch new chord.
-        cc(start-28 if bar else 0,64,0)
-        cc(start+95,64,76)
-        # Continuous accompaniment, 8ths on alternating chord tones,
-        # joined over each beat. No random gaps between the notes.
-        if section in ("intro","coda"):
-            figures=[(0,root,1.65),(1.5,chord[1],1.5),(3,chord[2],.95)]
-        else:
-            figures=[(0,root,1.0),(.75,chord[1],.92),(1.5,chord[2],.95),
-                     (2.25,chord[3],.95),(3.0,chord[2],.95),(3.65,chord[1],.45)]
-        if section=="bridge":
-            figures=[(0,root,1.4),(.9,chord[2],1.25),(1.8,chord[3],1.15),
-                     (2.65,chord[1],1.2),(3.3,chord[2],.8)]
-        if section=="coda" and n==3:
-            figures=[(0,root,3.6),(0.06,chord[1],3.5),(0.13,chord[2],3.4)]
-        for ix,(beat,pitch,dur) in enumerate(figures):
-            tone(start+beat*T,pitch,dur, (44+2*(ix==0)+r.randint(-3,3))*dynamic)
+        # Accompaniment v4: a single quiet, sustained chord per bar.
+        # No off-beat plucks, repeated short bass notes or eighth-note ostinato.
+        # Keep the accompaniment below the right-hand melody to prevent
+        # competing attacks and accidental same-key note-offs.
+        cc(start if bar else 0,64,0)
+        cc(start+36,64,86)
+        left_voicing = {
+            48: [48,55,60], 45: [45,52,57], 53: [41,53,60],
+            55: [43,55,59], 52: [40,52,59], 50: [38,50,57],
+        }[root]
+        # Slightly stagger the three fingers, mimicking a gentle rolled chord.
+        # Nearly full-bar holds preserve a bed of sound until harmony changes.
+        for ix, pitch in enumerate(left_voicing):
+            tone(start+ix*26, pitch, 3.88-ix*.04,
+                 (36 + (3 if ix==0 else 0) + r.randint(-2,2))*dynamic)
         if section=="intro":
             melody=[(72,.5,2.5)] if n%2==0 else [(69,.3,1.9),(67,2.2,1.6)]
         elif section=="coda":
