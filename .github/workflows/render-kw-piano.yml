@@ -1,6 +1,11 @@
 name: Render FreePats Upright Piano KW sample
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/make_midi.py'
+      - '.github/workflows/render-kw-piano.yml'
 
 permissions:
   contents: write
