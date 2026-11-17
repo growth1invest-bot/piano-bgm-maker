@@ -1,0 +1,75 @@
+name: Classical piano focus mix - KW samples
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/curated-classical-mix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  make-mix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install audio tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fluidsynth p7zip-full ffmpeg python3-mido
+      - name: Download verified public domain MIDI editions and KAWAI samples
+        run: |
+          set -euo pipefail
+          mkdir -p soundbank output midis
+          curl -fLsS --retry 4 'https://freepats.zenvoid.org/Piano/UprightPianoKW/UprightPianoKW-SF2-20220221.7z' -o soundbank/kw.7z
+          7z x soundbank/kw.7z -osoundbank -y
+          curl -fLsS --retry 4 'https://bwv.info/midi/846/5/wtk1-prelude1.mid' -o midis/01_bach.mid
+          curl -fLsS --retry 4 'https://www.mutopiaproject.org/ftp/SatieE/gymnopedie_1/gymnopedie_1.mid' -o midis/02_satie.mid
+          curl -fLsS --retry 4 'https://www.mutopiaproject.org/ftp/ChopinFF/O28/Chop-28-4a/Chop-28-4a.mid' -o midis/03_chopin.mid
+          SF2="$(find soundbank -type f -iname '*.sf2' -print -quit)"
+          test -n "$SF2"
+          echo "SF2=$SF2" >> "$GITHUB_ENV"
+      - name: Verify MIDI scores before rendering
+        run: |
+          /usr/bin/python3 - <<'PY'
+          import mido
+          from pathlib import Path
+          for file in sorted(Path('midis').glob('*.mid')):
+              m=mido.MidiFile(file)
+              notes=sum(msg.type=='note_on' and msg.velocity>0 for track in m.tracks for msg in track)
+              print(file, 'notes:',notes,'duration:',round(m.length,1))
+              assert notes>=60, f'not enough musical notes: {file}'
+          PY
+      - name: Render full classical scores without modifying melody or harmony
+        run: |
+          set -euo pipefail
+          for file in midis/*.mid; do
+            base="$(basename "$file" .mid)"
+            fluidsynth -ni -g 0.72 -F "output/$base.wav" -r 44100 "$SF2" "$file"
+            ffmpeg -loglevel error -y -i "output/$base.wav" -af 'alimiter=limit=0.93' -ar 44100 -ac 2 "output/$base.clean.wav"
+          done
+      - name: Make one listening mix with short track pauses
+        run: |
+          set -euo pipefail
+          ffmpeg -loglevel error -y -i output/01_bach.clean.wav -i output/02_satie.clean.wav -i output/03_chopin.clean.wav \
+            -filter_complex "[0:a]apad=pad_dur=3[a];[1:a]apad=pad_dur=3[b];[2:a]apad=pad_dur=4[c];[a][b][c]concat=n=3:v=0:a=1,alimiter=limit=0.93[m]" \
+            -map "[m]" -c:a libmp3lame -b:a 192k output/KAWAI_KW_Classical_Focus_Mix.mp3
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 output/KAWAI_KW_Classical_Focus_Mix.mp3
+          test -s output/KAWAI_KW_Classical_Focus_Mix.mp3
+      - name: Save mix in Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAWAI-KW-Classical-Focus-Mix
+          path: output/KAWAI_KW_Classical_Focus_Mix.mp3
+          retention-days: 14
+      - name: Publish mix and correct credits
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="kw-classical-mix-${{ github.run_number }}"
+          gh release create "$TAG" output/KAWAI_KW_Classical_Focus_Mix.mp3 \
+            --title "KAWAI KW Classical Focus Mix #${{ github.run_number }}" \
+            --notes "TEST MIX of existing classical compositions; NOT an original musical composition. Contents: (1) Bach, Well-Tempered Clavier Book I, Prelude BWV846, MIDI edited/sequenced by Tobias Erbsland, public domain (bwv.info MIDI #5); (2) Erik Satie, Gymnopedie No.1, MIDI edition by Evin Robertson, public domain, Mutopia ID37; (3) Frederic Chopin, Prelude Op28 No4, MIDI edition by Roland Goretzki, public domain, Mutopia ID921. Piano instrument samples: FreePats Upright Piano KW (CC0). All tracks computer-rendered, not human-played sound recordings. Sources: https://bwv.info/en/bwv/846/ ; https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=37 ; https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=921" \
+            --target "${{ github.sha }}"
