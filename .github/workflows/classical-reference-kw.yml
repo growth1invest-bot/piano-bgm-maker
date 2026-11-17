@@ -1,6 +1,10 @@
 name: Reference test - Chopin Prelude with KAWAI KW
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/classical-reference-kw.yml'
 
 permissions:
   contents: write
