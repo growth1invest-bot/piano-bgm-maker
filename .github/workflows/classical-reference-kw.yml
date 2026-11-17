@@ -1,0 +1,59 @@
+name: Reference test - Chopin Prelude with KAWAI KW
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render-reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install audio renderer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fluidsynth p7zip-full ffmpeg python3-mido
+      - name: Download licensed reference MIDI and KAWAI soundfont
+        run: |
+          set -euo pipefail
+          mkdir -p soundbank output
+          curl -fLSs --retry 4 --retry-delay 3 'https://www.mutopiaproject.org/ftp/ChopinFF/O28/Chop-28-4a/Chop-28-4a.mid' -o output/Chopin_Prelude_Op28_No4_reference.mid
+          curl -fLSs --retry 4 --retry-delay 3 'https://freepats.zenvoid.org/Piano/UprightPianoKW/UprightPianoKW-SF2-20220221.7z' -o soundbank/kw.7z
+          7z x soundbank/kw.7z -osoundbank -y
+          test -s output/Chopin_Prelude_Op28_No4_reference.mid
+          find soundbank -iname '*.sf2' | grep -q .
+      - name: Validate reference MIDI
+        run: |
+          /usr/bin/python3 - <<'PY'
+          import mido
+          f=mido.MidiFile('output/Chopin_Prelude_Op28_No4_reference.mid')
+          notes=sum(msg.type=='note_on' and msg.velocity>0 for t in f.tracks for msg in t)
+          print(f'Reference MIDI: {len(f.tracks)} tracks, {notes} played notes, {f.length:.1f} seconds')
+          assert notes>=100, 'MIDI contains too few notes for reference piece'
+          PY
+      - name: Render unmodified reference score with the KW piano
+        run: |
+          set -euo pipefail
+          SF2="$(find soundbank -iname '*.sf2' -print -quit)"
+          fluidsynth -ni -g 0.7 -F output/Chopin_Prelude_KAWAI_KW.wav -r 44100 "$SF2" output/Chopin_Prelude_Op28_No4_reference.mid
+          ffmpeg -loglevel error -y -i output/Chopin_Prelude_KAWAI_KW.wav -af 'alimiter=limit=0.9' -c:a libmp3lame -b:a 192k output/Chopin_Prelude_KAWAI_KW.mp3
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 output/Chopin_Prelude_KAWAI_KW.mp3
+          test -s output/Chopin_Prelude_KAWAI_KW.mp3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Chopin-reference-KAWAI-KW
+          path: |
+            output/*.mp3
+            output/*reference.mid
+          retention-days: 14
+      - name: Release the clearly labelled reference performance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "kw-classical-reference-${{ github.run_number }}" \
+            output/Chopin_Prelude_KAWAI_KW.mp3 \
+            --title "KAWAI KW classical reference: Chopin Prelude Op.28 No.4" \
+            --notes "COMPARISON TEST ONLY. Composition: Frederic Chopin, Prelude Op. 28 No. 4 (public domain). MIDI edition: Roland Goretzki / Mutopia Project, public domain (Mutopia-2007/02/01-921). Soundfont: FreePats Upright Piano KW, CC0. Computer-rendered MIDI, not a human performance, and not an original composition. Source: https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=921" \
+            --target "${{ github.sha }}"
