@@ -1,4 +1,4 @@
-name: Classical piano focus mix - KW samples
+name: Classical piano focus mix - KW samples (Bach Satie Chopin)
 on:
   workflow_dispatch:
   push:
