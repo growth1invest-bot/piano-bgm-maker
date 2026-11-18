@@ -1,0 +1,62 @@
+name: Contrasting original piano v7 - KAWAI KW
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/compose_contrasting_v7.py'
+      - '.github/workflows/render-v7-contrasting.yml'
+permissions:
+  contents: write
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MIDI and audio tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-mido fluidsynth p7zip-full ffmpeg
+      - name: Compose and validate distinct sections
+        run: |
+          /usr/bin/python3 scripts/compose_contrasting_v7.py
+          /usr/bin/python3 - <<'PY'
+          import mido
+          m=mido.MidiFile('output/V7_Contrasting_Original.mid')
+          notes=sum(msg.type=='note_on' and msg.velocity>0 for track in m.tracks for msg in track)
+          print('Seconds:',m.length,'Notes:',notes)
+          assert m.length>190
+          assert notes>=350
+          PY
+      - name: Download FreePats KAWAI KW samples
+        run: |
+          set -euo pipefail
+          mkdir -p soundbank
+          curl -fLSs --retry 4 --retry-delay 3 'https://freepats.zenvoid.org/Piano/UprightPianoKW/UprightPianoKW-SF2-20220221.7z' -o soundbank/kw.7z
+          7z x soundbank/kw.7z -osoundbank -y
+      - name: Render MP3
+        run: |
+          set -euo pipefail
+          SF2="$(find soundbank -iname '*.sf2' -print -quit)"
+          test -n "$SF2"
+          fluidsynth -ni -g 0.65 -F output/V7_Contrasting_Original.wav -r 44100 "$SF2" output/V7_Contrasting_Original.mid
+          ffmpeg -hide_banner -loglevel error -y -i output/V7_Contrasting_Original.wav -af 'aecho=0.8:0.55:100:0.10,alimiter=limit=0.9' -c:a libmp3lame -b:a 192k output/V7_Contrasting_Original.mp3
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 output/V7_Contrasting_Original.mp3
+          test -s output/V7_Contrasting_Original.mp3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: V7-Contrasting-Original-Piano
+          path: |
+            output/V7_Contrasting_Original.mp3
+            output/V7_Contrasting_Original.mid
+          retention-days: 14
+      - name: Publish reference MP3 to Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="kw-v7-contrasting-${{ github.run_number }}"
+          gh release create "$TAG" output/V7_Contrasting_Original.mp3 output/V7_Contrasting_Original.mid \
+            --title "Original Piano v7 - Contrasting themes #${{ github.run_number }}" \
+            --notes "Original ~3.5 minute evaluation suite. Opens and ends with approved v5 main theme; includes three newly composed, distinctly different themes in lyrical, bright and minor styles. KAWAI KW samples CC0 by FreePats. Computer-rendered piano, not human recorded performance. This is for listener evaluation prior to longer arrangement." \
+            --target "${{ github.sha }}"
