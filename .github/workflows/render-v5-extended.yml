@@ -1,0 +1,66 @@
+name: Long-form v5 piano composition - KAWAI KW
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/compose_v5_extended.py'
+      - '.github/workflows/render-v5-extended.yml'
+permissions:
+  contents: write
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install music rendering tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fluidsynth p7zip-full ffmpeg python3-mido
+      - name: Generate long-form score and validate notes
+        run: |
+          /usr/bin/python3 scripts/compose_v5_extended.py
+          /usr/bin/python3 - <<'PY'
+          import mido
+          m=mido.MidiFile('output/Upright_KW_Original_Piano.mid')
+          count=sum(x.type=='note_on' and x.velocity>0 for t in m.tracks for x in t)
+          print('Duration:',m.length,'seconds; notes:',count)
+          assert m.length > 500, 'Not a sufficiently long composition'
+          assert count > 1000, 'Missing performance notes'
+          PY
+      - name: Download actual KAWAI recorded samples
+        run: |
+          set -euo pipefail
+          mkdir -p soundbank
+          curl -fLSs --retry 4 --retry-delay 3 \
+            'https://freepats.zenvoid.org/Piano/UprightPianoKW/UprightPianoKW-SF2-20220221.7z' \
+            -o soundbank/kw.7z
+          7z x soundbank/kw.7z -osoundbank -y
+      - name: Render the extended original piano music
+        run: |
+          set -euo pipefail
+          SF2="$(find soundbank -iname '*.sf2' -print -quit)"
+          test -n "$SF2"
+          fluidsynth -ni -g 0.65 -F output/V5_Extended_Piano.wav -r 44100 "$SF2" output/Upright_KW_Original_Piano.mid
+          ffmpeg -hide_banner -loglevel error -y -i output/V5_Extended_Piano.wav \
+            -af 'aecho=0.8:0.55:100:0.11,alimiter=limit=0.9' \
+            -c:a libmp3lame -b:a 192k output/V5_Extended_Piano.mp3
+          test -s output/V5_Extended_Piano.mp3
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 output/V5_Extended_Piano.mp3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: V5-Extended-Piano-MP3
+          path: |
+            output/V5_Extended_Piano.mp3
+            output/Upright_KW_Original_Piano.mid
+          retention-days: 14
+      - name: Publish independently named release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="kw-v5-extended-${{ github.run_number }}"
+          gh release create "$TAG" output/V5_Extended_Piano.mp3 output/Upright_KW_Original_Piano.mid \
+            --title "Original Piano v5 - Extended Listening Mix #${{ github.run_number }}" \
+            --notes "Original, four-movement, 192-bar extension based on previously approved v5 themes. All notes encoded in scripts/compose_v5_extended.py, generated without third-party classical composition material. Rendered with FreePats Upright Piano KW (CC0). Computer-rendered performance, not human-played. For listening evaluation prior to longer YouTube production." \
+            --target "${{ github.sha }}"
