@@ -73,9 +73,6 @@ def compose_chapter(index,config):
         for j,(p,d) in enumerate(line):
             # Original melody is intact. Tiny expressive dynamic shapes only.
             register=p
-            if index==4 and bars%32 in range(24,32):
-                # Gentle lower-register answer late in reflective chapter.
-                register=max(60,p-12)
             vel=(69 if j==0 else 62)*weight
             note(start+pos*T,start+(pos+d)*T+(25 if j<len(line)-1 else -10),register,vel)
             pos+=d
