@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/make_midi.py'
+      - 'scripts/compose_v5.py'
       - '.github/workflows/render-kw-piano.yml'
 
 permissions:
@@ -29,7 +30,7 @@ jobs:
           7z x soundbank/kw.7z -osoundbank -y
           find soundbank -type f -iname '*.sf2' -print
       - name: Compose original MIDI
-        run: /usr/bin/python3 scripts/make_midi.py
+        run: /usr/bin/python3 scripts/compose_v5.py
       - name: Render the actual KW samples
         run: |
           SF2="$(find soundbank -type f -iname '*.sf2' -print -quit)"
@@ -54,10 +55,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="kw-preview-${{ github.run_number }}"
+          TAG="kw-original-v5-${{ github.run_number }}"
           gh release create "$TAG" \
             output/Upright_KW_Original_Piano.mp3 \
             output/Upright_KW_Original_Piano.mid \
-            --title "Upright Piano KW Preview #${{ github.run_number }}" \
-            --notes "Original piano instrumental rendered with the FreePats CC0 Upright Piano KW soundfont. This is a computer-rendered performance using real piano samples." \
+            --title "Original Piano Composition v5 | KAWAI KW #${{ github.run_number }}" \
+            --notes "Original 48-bar piano composition, hand-authored six-section melody and harmony, rendered with FreePats Upright Piano KW (CC0). Computer performance, not human played. Test version for listening review, not a finished commercial release." \
             --target "${{ github.sha }}"
