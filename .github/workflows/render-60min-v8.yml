@@ -1,0 +1,82 @@
+name: 60min KAWAI piano - six chapters
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/compose_60min_v8.py'
+      - '.github/workflows/render-60min-v8.yml'
+permissions:
+  contents: write
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install composer and renderer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-mido fluidsynth p7zip-full ffmpeg
+      - name: Create and validate six 10-minute MIDI chapters
+        run: |
+          /usr/bin/python3 scripts/compose_60min_v8.py
+          /usr/bin/python3 - <<'PY'
+          import mido
+          from pathlib import Path
+          files=sorted(Path('output').glob('chapter_*.mid'))
+          assert len(files)==6
+          for path in files:
+              mid=mido.MidiFile(path)
+              notes=sum(m.type=='note_on' and m.velocity>0 for tr in mid.tracks for m in tr)
+              print(path,round(mid.length,2),notes)
+              assert mid.length>=600 and notes>=400
+          PY
+      - name: Download FreePats real KAWAI piano samples
+        run: |
+          set -euo pipefail
+          mkdir -p soundbank
+          curl -fLSs --retry 4 --retry-delay 3 'https://freepats.zenvoid.org/Piano/UprightPianoKW/UprightPianoKW-SF2-20220221.7z' -o soundbank/kw.7z
+          7z x soundbank/kw.7z -osoundbank -y
+          SF2="$(find soundbank -iname '*.sf2' -print -quit)"
+          test -n "$SF2"
+          echo "KW_SF2=$SF2" >> "$GITHUB_ENV"
+      - name: Render each chapter and shape exact 10-minute segments
+        run: |
+          set -euo pipefail
+          for i in 01 02 03 04 05 06; do
+            fluidsynth -ni -g 0.68 -F "output/chapter_${i}.wav" -r 44100 "$KW_SF2" "output/chapter_${i}.mid"
+            ffmpeg -hide_banner -loglevel error -y -i "output/chapter_${i}.wav" \
+              -af "atrim=0:600,apad=whole_dur=600,atrim=0:600,afade=t=in:st=0:d=1.2,afade=t=out:st=597:d=3,alimiter=limit=0.92" \
+              -ar 44100 -ac 2 -c:a pcm_s16le "output/chapter_${i}_ready.wav"
+            rm "output/chapter_${i}.wav"
+          done
+      - name: Join six chapters into exactly 60 minutes
+        run: |
+          set -euo pipefail
+          printf "file 'chapter_01_ready.wav'\nfile 'chapter_02_ready.wav'\nfile 'chapter_03_ready.wav'\nfile 'chapter_04_ready.wav'\nfile 'chapter_05_ready.wav'\nfile 'chapter_06_ready.wav'\n" > output/list.txt
+          ffmpeg -hide_banner -loglevel error -y -f concat -safe 0 -i output/list.txt \
+            -c:a libmp3lame -b:a 192k -ar 44100 -ac 2 output/KAWAI_Original_Piano_60min_Six_Moods.mp3
+          python3 - <<'PY'
+          import json, subprocess
+          path='output/KAWAI_Original_Piano_60min_Six_Moods.mp3'
+          info=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration,size','-of','json',path]))
+          dur=float(info['format']['duration'])
+          print('FINAL MP3:',info['format'])
+          assert 3599.5<=dur<=3600.5, f'unexpected duration: {dur}'
+          PY
+          test -s output/KAWAI_Original_Piano_60min_Six_Moods.mp3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAWAI-Original-Piano-60min-Six-Moods
+          path: output/KAWAI_Original_Piano_60min_Six_Moods.mp3
+          retention-days: 14
+      - name: Release final MP3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="kw-sixty-minute-${{ github.run_number }}"
+          gh release create "$TAG" output/KAWAI_Original_Piano_60min_Six_Moods.mp3 \
+            --title "KAWAI Original Piano - Six Moods 60min" \
+            --notes "60 minute instrumental piano BGM in six 10-minute chapters. 0:00 Warm opening, 10:00 Lyrical and spacious, 20:00 Bright moving piano, 30:00 Reflective and quiet, 40:00 Gentle forward motion, 50:00 Return and resolution. Original v7 themes reused and developed into longer sections; repeated written phrases occur inside chapters, but the entire hour is NOT one short audio loop. Uses FreePats Upright Piano KW CC0 recorded samples, computer-rendered MIDI performance (not a live human performance)." \
+            --target "${{ github.sha }}"
